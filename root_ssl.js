@@ -1,23 +1,7 @@
-/*
- * This script combines, fixes & extends a long list of other scripts, most notably including:
- *
- * - https://codeshare.frida.re/@akabe1/frida-multiple-unpinning/
- * - https://codeshare.frida.re/@avltree9798/universal-android-ssl-pinning-bypass/
- * - https://pastebin.com/TVJD63uM
- */
-
 setTimeout(function () {
     Java.perform(function () {
         console.log("---");
         console.log("Unpinning Android app...");
-
-        /// -- Generic hook to protect against SSLPeerUnverifiedException -- ///
-
-        // In some cases, with unusual cert pinning approaches, or heavy obfuscation, we can't
-        // match the real method & package names. This is a problem! Fortunately, we can still
-        // always match built-in types, so here we spot all failures that use the built-in cert
-        // error type (notably this includes OkHttp), and after the first failure, we dynamically
-        // generate & inject a patch to completely disable the method that threw the error.
         try {
             const UnverifiedCertError = Java.use('javax.net.ssl.SSLPeerUnverifiedException');
             UnverifiedCertError.$init.implementation = function (str) {
@@ -38,18 +22,13 @@ setTimeout(function () {
                     const callingClass = Java.use(className);
                     const callingMethod = callingClass[methodName];
 
-                    if (callingMethod.implementation) return; // Already patched by Frida - skip it
+                    if (callingMethod.implementation) return; 
 
                     console.log('      Attempting to patch automatically...');
                     const returnTypeName = callingMethod.returnType.type;
 
                     callingMethod.implementation = function () {
                         console.log(`  --> Bypassing ${className}->${methodName} (automatic exception patch)`);
-
-                        // This is not a perfect fix! Most unknown cases like this are really just
-                        // checkCert(cert) methods though, so doing nothing is perfect, and if we
-                        // do need an actual return value then this is probably the best we can do,
-                        // and at least we're logging the method name so you can patch it manually:
 
                         if (returnTypeName === 'void') {
                             return;
@@ -70,14 +49,11 @@ setTimeout(function () {
             console.log('[ ] SSLPeerUnverifiedException auto-patcher');
         }
 
-        /// -- Specific targeted hooks: -- ///
-
-        // HttpsURLConnection
         try {
             const HttpsURLConnection = Java.use("javax.net.ssl.HttpsURLConnection");
             HttpsURLConnection.setDefaultHostnameVerifier.implementation = function (hostnameVerifier) {
                 console.log('  --> Bypassing HttpsURLConnection (setDefaultHostnameVerifier)');
-                return; // Do nothing, i.e. don't change the hostname verifier
+                return;
             };
             console.log('[+] HttpsURLConnection (setDefaultHostnameVerifier)');
         } catch (err) {
@@ -87,7 +63,7 @@ setTimeout(function () {
             const HttpsURLConnection = Java.use("javax.net.ssl.HttpsURLConnection");
             HttpsURLConnection.setSSLSocketFactory.implementation = function (SSLSocketFactory) {
                 console.log('  --> Bypassing HttpsURLConnection (setSSLSocketFactory)');
-                return; // Do nothing, i.e. don't change the SSL socket factory
+                return; 
             };
             console.log('[+] HttpsURLConnection (setSSLSocketFactory)');
         } catch (err) {
@@ -97,7 +73,7 @@ setTimeout(function () {
             const HttpsURLConnection = Java.use("javax.net.ssl.HttpsURLConnection");
             HttpsURLConnection.setHostnameVerifier.implementation = function (hostnameVerifier) {
                 console.log('  --> Bypassing HttpsURLConnection (setHostnameVerifier)');
-                return; // Do nothing, i.e. don't change the hostname verifier
+                return; 
             };
             console.log('[+] HttpsURLConnection (setHostnameVerifier)');
         } catch (err) {
@@ -110,7 +86,7 @@ setTimeout(function () {
             const SSLContext = Java.use('javax.net.ssl.SSLContext');
 
             const TrustManager = Java.registerClass({
-                // Implement a custom TrustManager
+
                 name: 'dev.asd.test.TrustManager',
                 implements: [X509TrustManager],
                 methods: {
@@ -120,15 +96,15 @@ setTimeout(function () {
                 }
             });
 
-            // Prepare the TrustManager array to pass to SSLContext.init()
+
             const TrustManagers = [TrustManager.$new()];
 
-            // Get a handle on the init() on the SSLContext class
+     
             const SSLContext_init = SSLContext.init.overload(
                 '[Ljavax.net.ssl.KeyManager;', '[Ljavax.net.ssl.TrustManager;', 'java.security.SecureRandom'
             );
 
-            // Override the init method, specifying the custom TrustManager
+
             SSLContext_init.implementation = function (keyManager, trustManager, secureRandom) {
                 console.log('  --> Bypassing Trustmanager (Android < 7) request');
                 SSLContext_init.call(this, keyManager, TrustManagers, secureRandom);
@@ -138,12 +114,11 @@ setTimeout(function () {
             console.log('[ ] SSLContext');
         }
 
-        // TrustManagerImpl (Android > 7)
+    
         try {
             const array_list = Java.use("java.util.ArrayList");
             const TrustManagerImpl = Java.use('com.android.org.conscrypt.TrustManagerImpl');
 
-            // This step is notably what defeats the most common case: network security config
             TrustManagerImpl.checkTrustedRecursive.implementation = function(a1, a2, a3, a4, a5, a6) {
                 console.log('  --> Bypassing TrustManagerImpl checkTrusted ');
                 return array_list.$new();
@@ -158,7 +133,7 @@ setTimeout(function () {
             console.log('[ ] TrustManagerImpl');
         }
 
-        // OkHTTPv3 (quadruple bypass)
+
         try {
             // Bypass OkHTTPv3 {1}
             const okhttp3_Activity_1 = Java.use('okhttp3.CertificatePinner');
@@ -171,8 +146,7 @@ setTimeout(function () {
             console.log('[ ] OkHTTPv3 (list)');
         }
         try {
-            // Bypass OkHTTPv3 {2}
-            // This method of CertificatePinner.check could be found in some old Android app
+
             const okhttp3_Activity_2 = Java.use('okhttp3.CertificatePinner');
             okhttp3_Activity_2.check.overload('java.lang.String', 'java.security.cert.Certificate').implementation = function (a, b) {
                 console.log('  --> Bypassing OkHTTPv3 (cert): ' + a);
@@ -791,23 +765,6 @@ Java.perform(function() {
 
         }
     });
-
-    /*
-
-    TO IMPLEMENT:
-
-    Exec Family
-
-    int execl(const char *path, const char *arg0, ..., const char *argn, (char *)0);
-    int execle(const char *path, const char *arg0, ..., const char *argn, (char *)0, char *const envp[]);
-    int execlp(const char *file, const char *arg0, ..., const char *argn, (char *)0);
-    int execlpe(const char *file, const char *arg0, ..., const char *argn, (char *)0, char *const envp[]);
-    int execv(const char *path, char *const argv[]);
-    int execve(const char *path, char *const argv[], char *const envp[]);
-    int execvp(const char *file, char *const argv[]);
-    int execvpe(const char *file, char *const argv[], char *const envp[]);
-
-    */
 
 
     BufferedReader.readLine.overload().implementation = function() {
