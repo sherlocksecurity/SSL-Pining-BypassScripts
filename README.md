@@ -6,5 +6,5 @@
 > frida-ps -Ua
 
 3. Run the command to bypass the root and SSL pinning restrictions
-> frida -U -f (app_path) -l root_and_ssl.js
+> frida -U -f (app_path) -l master_bypass.js
 
